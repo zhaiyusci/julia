@@ -310,10 +310,10 @@ function statement_cost(ex::Expr, line::Int, src::CodeInfo, sptypes::Vector{Any}
             # depend strongly on whether the result can be
             # inferred, so check the type of ex
             if f === Main.Core.getfield || f === Main.Core.tuple
-                # we might like to penalize non-inferrability, but
-                # tuple iteration/destructuring makes that impossible
-                # return plus_saturate(argcost, isknowntype(extyp) ? 1 : params.inline_nonleaf_penalty)
-                return 0
+                # we might like to heavily penalize non-inferrability, but
+                # tuple iteration/destructuring makes that inaccurate
+                # return isknowntype(extyp) ? 1 : params.inline_nonleaf_penalty
+                return 1
             elseif (f === Main.Core.arrayref || f === Main.Core.const_arrayref) && length(ex.args) >= 3
                 atyp = argextype(ex.args[3], src, sptypes, slottypes)
                 return isknowntype(atyp) ? 4 : error_path ? params.inline_error_path_cost : params.inline_nonleaf_penalty
@@ -374,9 +374,9 @@ function inline_worthy(body::Array{Any,1}, src::CodeInfo, sptypes::Vector{Any}, 
             # loops are generally always expensive
             # but assume that forward jumps are already counted for from
             # summing the cost of the not-taken branch
-            thiscost = stmt.label < line ? 40 : 0
+            thiscost = stmt.label < line ? 40 : 1
         elseif stmt isa GotoIfNot
-            thiscost = stmt.dest < line ? 40 : 0
+            thiscost = stmt.dest < line ? 40 : 1
         else
             continue
         end

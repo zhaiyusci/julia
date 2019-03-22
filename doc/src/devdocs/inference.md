@@ -118,8 +118,8 @@ cst = map(cost, ci.code)
 # output
 
 31-element Vector{Int64}:
-  0
-  0
+  1
+  1
  20
   4
   1
