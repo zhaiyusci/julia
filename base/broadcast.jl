@@ -772,7 +772,7 @@ julia> string.(("one","two","three","four"), ": ", 1:4)
 
 ```
 """
-broadcast(f::Tf, As...) where {Tf} = materialize(broadcasted(f, As...))
+broadcast(f::Tf, As::Vararg{Any,N}) where {Tf,N} = materialize(broadcasted(f, As...))
 
 # special cases defined for performance
 @inline broadcast(f, x::Number...) = f(x...)
@@ -1242,26 +1242,15 @@ macro __dot__(x)
     esc(__dot__(x))
 end
 
-@inline broadcasted_kwsyntax(f, args...; kwargs...) = broadcasted((args...)->f(args...; kwargs...), args...)
-@inline function broadcasted(f, args...)
+############################################################
+# define the default kernel behaviors
+
+@inline broadcasted_kwsyntax(f, args...; kwargs...) =
+    broadcasted((args...) -> f(args...; kwargs...), args...)
+@inline function broadcasted(f, args::Vararg{Any,N}) where N
     args′ = map(broadcastable, args)
-    broadcasted(combine_styles(args′...), f, args′...)
+    return broadcasted(combine_styles(args′...), f, args′...)
 end
-# Due to the current Type{T}/DataType specialization heuristics within Tuples,
-# the totally generic varargs broadcasted(f, args...) method above loses Type{T}s in
-# mapping broadcastable across the args. These additional methods with explicit
-# arguments ensure we preserve Type{T}s in the first or second argument position.
-@inline function broadcasted(f, arg1, args...)
-    arg1′ = broadcastable(arg1)
-    args′ = map(broadcastable, args)
-    broadcasted(combine_styles(arg1′, args′...), f, arg1′, args′...)
-end
-@inline function broadcasted(f, arg1, arg2, args...)
-    arg1′ = broadcastable(arg1)
-    arg2′ = broadcastable(arg2)
-    args′ = map(broadcastable, args)
-    broadcasted(combine_styles(arg1′, arg2′, args′...), f, arg1′, arg2′, args′...)
-end
-@inline broadcasted(::S, f, args...) where S<:BroadcastStyle = Broadcasted{S}(f, args)
+@inline broadcasted(::S, f, args::Vararg{Any,N}) where {S<:BroadcastStyle,N} = Broadcasted{S}(f, args)
 
 end # module
