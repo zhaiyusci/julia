@@ -395,6 +395,7 @@ static void ctx_switch(jl_ptls_t ptls)
     }
 
     // set up global state for new task
+    t->ptls = ptls;
     ptls->pgcstack = t->gcstack;
     ptls->world_age = 0;
     t->gcstack = NULL;
@@ -704,6 +705,7 @@ JL_DLLEXPORT jl_task_t *jl_new_task(jl_function_t *start, jl_value_t *completion
     t->started = 0;
     t->prio = -1;
     t->tid = -1;
+    t->ptls = ptls;
 
 #if defined(JL_DEBUG_BUILD)
     if (!t->copy_stack)
@@ -1248,6 +1250,7 @@ void jl_init_root_task(void *stack_lo, void *stack_hi)
     ptls->current_task->excstack = NULL;
     ptls->current_task->tid = ptls->tid;
     ptls->current_task->sticky = 1;
+    ptls->current_task->ptls = ptls;
 
 #ifdef JL_TSAN_ENABLED
     ptls->current_task->tsan_state = __tsan_get_current_fiber();
