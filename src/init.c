@@ -733,6 +733,15 @@ JL_DLLEXPORT void julia_init(JL_IMAGE_SEARCH rel)
 
     jl_gc_enable(0);
 
+    // We need `gcstack` in `Task` to allocate Julia objects; *including* the `Task` type.
+    // However, to allocate a `Task` via `jl_gc_alloc` as done in `jl_init_root_task`,
+    // we need the `Task` type itself. We use stack-allocated "raw" `jl_task_t` struct to
+    // workaround this chicken-and-egg problem. Note that this relies on GC to be turned
+    // off just above as GC fails because we don't/can't allocate the type tag.
+    jl_task_t bootstrap_task;
+    bootstrap_task.gcstack = NULL;
+    jl_current_task = &bootstrap_task;
+
     jl_resolve_sysimg_location(rel);
     // loads sysimg if available, and conditionally sets jl_options.cpu_target
     if (jl_options.image_file)
@@ -750,6 +759,7 @@ JL_DLLEXPORT void julia_init(JL_IMAGE_SEARCH rel)
 
     jl_init_tasks();
     jl_init_root_task(stack_lo, stack_hi);
+    assert(jl_current_task != &bootstrap_task);
     jl_init_common_symbols();
     jl_init_flisp();
     jl_init_serializer();
