@@ -383,9 +383,10 @@ end
 """
     open(f::Function, command, args...; kwargs...)
 
-Similar to `open(command, args...; kwargs...)`, but calls `f(stream)` on the resulting process
-stream, then closes the input stream and waits for the process to complete.
-Returns the value returned by `f`.
+Similar to `open(command, args...; kwargs...)`, but calls `f(stream)` on the
+resulting process stream, then closes the I/O streams and waits for the process
+to complete. Return the value returned by `f` on success. Throw an error if the
+process failed.
 """
 function open(f::Function, cmds::AbstractCmd, args...; kwargs...)
     P = open(cmds, args...; kwargs...)
@@ -395,7 +396,7 @@ function open(f::Function, cmds::AbstractCmd, args...; kwargs...)
         kill(P)
         rethrow()
     finally
-        close(P.in)
+        close(P)
     end
     success(P) || pipeline_error(P)
     return ret
