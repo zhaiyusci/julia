@@ -2310,7 +2310,7 @@ mapany(f, itr) = Any[f(x) for x in itr]
 Transform collection `c` by applying `f` to each element. For multiple collection arguments,
 apply `f` elementwise.
 
-See also: [`mapslices`](@ref)
+See also [`mapslices`](@ref).
 
 # Examples
 ```jldoctest
