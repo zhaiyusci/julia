@@ -83,6 +83,11 @@ Standard library changes
   @test isequal(complex(one(T)) / complex(T(Inf), T(-Inf)), complex(zero(T), zero(T))) broken=(T == Float64)
   ```
   ([#39322])
+* `replace(::String)` now allows multiple patterns to be specified, and they
+  will be applied left-to-right simultaneously, so only one pattern will be
+  applied to any character, and the patterns will only be applied to the input
+  text, not the replacements. ([#TBD])
+
 
 #### Package Manager
 
