@@ -1598,13 +1598,13 @@ argument specifies a random number generator, see [Random Numbers](@ref).
 # Examples
 ```jldoctest; setup = :(using Random; Random.seed!(1234))
 julia> sprand(Bool, 2, 2, 0.5)
-2×2 SparseMatrixCSC{Bool, Int64} with 1 stored entry:
- ⋅  ⋅
- ⋅  1
+2×2 SparseMatrixCSC{Bool, Int64} with 4 stored entries:
+ 1  1
+ 1  1
 
 julia> sprand(Float64, 3, 0.75)
 3-element SparseVector{Float64, Int64} with 1 stored entry:
-  [3]  =  0.298614
+  [1]  =  0.66338
 ```
 """
 function sprand(r::AbstractRNG, m::Integer, n::Integer, density::AbstractFloat, rfn::Function, ::Type{T}=eltype(rfn(r, 1))) where T
@@ -1645,9 +1645,9 @@ argument specifies a random number generator, see [Random Numbers](@ref).
 # Examples
 ```jldoctest; setup = :(using Random; Random.seed!(0))
 julia> sprandn(2, 2, 0.75)
-2×2 SparseMatrixCSC{Float64, Int64} with 2 stored entries:
-  ⋅   0.586617
-  ⋅   0.297336
+2×2 SparseMatrixCSC{Float64, Int64} with 4 stored entries:
+  1.49137  1.09378
+ -1.56692  1.1035
 ```
 """
 sprandn(r::AbstractRNG, m::Integer, n::Integer, density::AbstractFloat) =

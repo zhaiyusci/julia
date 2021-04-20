@@ -1264,7 +1264,7 @@ function testset_beginend(args, tests, source)
         local oldrng = copy(RNG)
         try
             # RNG is re-seeded with its own seed to ease reproduce a failed test
-            Random.seed!(RNG.seed)
+            Random.seed!(Random.GLOBAL_SEED)
             let
                 $(esc(tests))
             end
@@ -1355,7 +1355,7 @@ function testset_forloop(args, testloop, source)
         local ts
         local RNG = default_rng()
         local oldrng = copy(RNG)
-        Random.seed!(RNG.seed)
+        Random.seed!(Random.GLOBAL_SEED)
         local tmprng = copy(RNG)
         try
             let
@@ -1826,7 +1826,7 @@ end
 
 "`guardseed(f, seed)` is equivalent to running `Random.seed!(seed); f()` and
 then restoring the state of the global RNG as it was before."
-guardseed(f::Function, seed::Union{Vector{UInt32},Integer}) = guardseed() do
+guardseed(f::Function, seed::Union{Vector{UInt64},Vector{UInt32},Integer,NTuple{4,UInt64}}) = guardseed() do
     Random.seed!(seed)
     f()
 end

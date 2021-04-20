@@ -22,10 +22,10 @@ Random.seed!(1234321)
     @testset "for $elty" for elty in (Float32, Float64, ComplexF32, ComplexF64)
         ainit = convert(Matrix{elty}, ainit)
         for a in (copy(ainit), view(ainit, 1:n, 1:n))
-            @test cond(a,1) ≈ 4.837320054554436e+02 atol=0.01
-            @test cond(a,2) ≈ 1.960057871514615e+02 atol=0.01
-            @test cond(a,Inf) ≈ 3.757017682707787e+02 atol=0.01
-            @test cond(a[:,1:5]) ≈ 10.233059337453463 atol=0.01
+            @test cond(a,1) ≈ 11860.833898970453 atol=0.5
+            @test cond(a,2) ≈ 5578.947735096807 atol=0.5
+            @test cond(a,Inf) ≈ 9974.454657908922 atol=0.4
+            @test cond(a[:,1:5]) ≈ 5.956698046316083 atol=0.01
             @test_throws ArgumentError cond(a,3)
         end
     end

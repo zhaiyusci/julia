@@ -1724,7 +1724,7 @@ end
     local A = guardseed(1234321) do
         triu(sprand(10, 10, 0.2))
     end
-    @test getcolptr(SparseArrays.droptol!(A, 0.01)) == [1, 2, 2, 3, 4, 5, 5, 6, 8, 10, 13]
+    @test getcolptr(SparseArrays.droptol!(A, 0.01)) == [1, 1, 1, 1, 4, 5, 6, 6, 9, 11, 14]
     @test isequal(SparseArrays.droptol!(sparse([1], [1], [1]), 1), SparseMatrixCSC(1, 1, Int[1, 1], Int[], Int[]))
 end
 

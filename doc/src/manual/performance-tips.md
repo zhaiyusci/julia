@@ -77,12 +77,12 @@ julia> function sum_global()
        end;
 
 julia> @time sum_global()
-  0.009639 seconds (7.36 k allocations: 300.310 KiB, 98.32% compilation time)
-496.84883432553846
+  0.011001 seconds (9.30 k allocations: 417.044 KiB, 98.77% compilation time)
+503.4466694614652
 
 julia> @time sum_global()
-  0.000140 seconds (3.49 k allocations: 70.313 KiB)
-496.84883432553846
+  0.000075 seconds (3.49 k allocations: 70.156 KiB)
+503.4466694614652
 ```
 
 On the first call (`@time sum_global()`) the function gets compiled. (If you've not yet used [`@time`](@ref)
@@ -113,12 +113,12 @@ julia> function sum_arg(x)
        end;
 
 julia> @time sum_arg(x)
-  0.006202 seconds (4.18 k allocations: 217.860 KiB, 99.72% compilation time)
-496.84883432553846
+  0.007258 seconds (4.24 k allocations: 226.052 KiB, 99.74% compilation time)
+503.4466694614652
 
 julia> @time sum_arg(x)
   0.000005 seconds (1 allocation: 16 bytes)
-496.84883432553846
+503.4466694614652
 ```
 
 The 1 allocation seen is from running the `@time` macro itself in global scope. If we instead run
@@ -128,8 +128,8 @@ the timing in a function, we can see that indeed no allocations are performed:
 julia> time_sum(x) = @time sum_arg(x);
 
 julia> time_sum(x)
-  0.000001 seconds
-496.84883432553846
+  0.000002 seconds
+503.4466694614652
 ```
 
 In some situations, your function may need to allocate memory as part of its operation, and this
