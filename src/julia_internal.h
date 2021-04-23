@@ -727,8 +727,11 @@ void jl_safepoint_defer_sigint(void);
 int jl_safepoint_consume_sigint(void);
 void jl_wake_libuv(void);
 
+JL_DLLEXPORT JL_CONST_FUNC jl_gcframe_t **(jl_get_pgcstack)(void) JL_GLOBALLY_ROOTED JL_NOTSAFEPOINT;
+void jl_set_pgcstack(jl_gcframe_t **) JL_NOTSAFEPOINT;
 #if !defined(__clang_analyzer__)
 jl_get_ptls_states_func jl_get_ptls_states_getter(void);
+jl_get_pgcstack_func jl_get_pgcstack_getter(void);
 static inline void jl_set_gc_and_wait(void)
 {
     jl_ptls_t ptls = jl_get_ptls_states();

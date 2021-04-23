@@ -36,6 +36,25 @@ extern "C" {
 
 #include "threading.h"
 
+static pthread_key_t jl_pgcstack_key;
+JL_CONST_FUNC jl_gcframe_t **jl_get_pgcstack(void) JL_NOTSAFEPOINT
+{
+    return pthread_getspecific(jl_pgcstack_key);
+}
+void jl_set_pgcstack(jl_gcframe_t **pgcstack) JL_NOTSAFEPOINT
+{
+    pthread_setspecific(jl_pgcstack_key, pgcstack);
+}
+__attribute__((constructor)) void jl_init_tls(void)
+{
+    pthread_key_create(&jl_pgcstack_key, NULL);
+}
+jl_get_pgcstack_func jl_get_pgcstack_getter(void)
+{
+    // for codegen
+    return &jl_get_pgcstack;
+}
+
 // The tls_states buffer:
 //
 // On platforms that do not use ELF (i.e. where `__thread` is emulated with
@@ -60,7 +79,7 @@ __attribute__((constructor)) void jl_mac_init_tls(void)
     pthread_key_create(&jl_tls_key, NULL);
 }
 
-JL_DLLEXPORT JL_CONST_FUNC jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
+JL_DLLEXPORT jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
 {
     void *ptls = pthread_getspecific(jl_tls_key);
     if (__unlikely(!ptls)) {
@@ -71,7 +90,7 @@ JL_DLLEXPORT JL_CONST_FUNC jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOT
 }
 
 // This is only used after the tls is already initialized on the thread
-static JL_CONST_FUNC jl_ptls_t jl_get_ptls_states_fast(void) JL_NOTSAFEPOINT
+static jl_ptls_t jl_get_ptls_states_fast(void) JL_NOTSAFEPOINT
 {
     return (jl_ptls_t)pthread_getspecific(jl_tls_key);
 }
@@ -113,7 +132,7 @@ BOOLEAN WINAPI DllMain(IN HINSTANCE hDllHandle, IN DWORD nReason,
     return 1; // success
 }
 
-JL_DLLEXPORT JL_CONST_FUNC jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
+JL_DLLEXPORT jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
 {
 #if defined(_CPU_X86_64_)
     DWORD *plast_error = (DWORD*)(__readgsqword(0x30) + 0x68);
@@ -156,13 +175,13 @@ JL_DLLEXPORT void jl_set_ptls_states_getter(jl_get_ptls_states_func f) { }
 // version as the symbol address if we didn't find the static version in `ifunc`.
 
 // fallback provided for embedding
-static JL_CONST_FUNC jl_ptls_t jl_get_ptls_states_fallback(void)
+static jl_ptls_t jl_get_ptls_states_fallback(void)
 {
     static __thread jl_tls_states_t tls_states;
     return &tls_states;
 }
 #  if JL_USE_IFUNC
-JL_DLLEXPORT JL_CONST_FUNC __attribute__((weak))
+JL_DLLEXPORT __attribute__((weak))
 jl_ptls_t jl_get_ptls_states_static(void);
 #  endif
 static jl_ptls_t jl_get_ptls_states_init(void);
@@ -200,7 +219,7 @@ JL_DLLEXPORT void jl_set_ptls_states_getter(jl_get_ptls_states_func f)
     }
 }
 
-JL_DLLEXPORT JL_CONST_FUNC jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
+JL_DLLEXPORT jl_ptls_t (jl_get_ptls_states)(void) JL_GLOBALLY_ROOTED
 {
 #ifndef __clang_analyzer__
     return (*jl_tls_states_cb)();

@@ -738,9 +738,12 @@ JL_DLLEXPORT void julia_init(JL_IMAGE_SEARCH rel)
     // we need the `Task` type itself. We use stack-allocated "raw" `jl_task_t` struct to
     // workaround this chicken-and-egg problem. Note that this relies on GC to be turned
     // off just above as GC fails because we don't/can't allocate the type tag.
-    jl_task_t bootstrap_task = {0};
-    assert(bootstrap_task.gcstack == NULL);
-    jl_current_task = &bootstrap_task;
+    struct {
+        jl_value_t *type;
+        jl_task_t value;
+    } bootstrap_task = {0};
+    ptls->current_task = &bootstrap_task.value;
+    jl_set_pgcstack(&bootstrap_task.value.gcstack);
 
     jl_resolve_sysimg_location(rel);
     // loads sysimg if available, and conditionally sets jl_options.cpu_target
@@ -759,7 +762,8 @@ JL_DLLEXPORT void julia_init(JL_IMAGE_SEARCH rel)
 
     jl_init_tasks();
     jl_init_root_task(stack_lo, stack_hi);
-    assert(jl_current_task != &bootstrap_task);
+    assert(ptls->current_task != &bootstrap_task.value);
+    assert(jl_current_task == ptls->current_task);
     jl_init_common_symbols();
     jl_init_flisp();
     jl_init_serializer();

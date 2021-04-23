@@ -401,6 +401,7 @@ static void ctx_switch(jl_ptls_t ptls)
     ptls->previous_task = lastt;
 #endif
     ptls->current_task = t;
+    jl_set_pgcstack(&t->gcstack);
 
 #if defined(JL_TSAN_ENABLED)
     tsan_switch_to_ctx(&t->tsan_state);
@@ -1249,6 +1250,7 @@ void jl_init_root_task(void *stack_lo, void *stack_hi)
     ptls->current_task->tid = ptls->tid;
     ptls->current_task->sticky = 1;
     ptls->current_task->ptls = ptls;
+    jl_set_pgcstack(&ptls->current_task->gcstack);
 
 #ifdef JL_TSAN_ENABLED
     ptls->current_task->tsan_state = __tsan_get_current_fiber();

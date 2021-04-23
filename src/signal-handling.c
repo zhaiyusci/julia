@@ -241,9 +241,9 @@ void jl_critical_error(int sig, bt_context_t *context)
     size_t i, n = *bt_size;
     if (sig) {
         // kill this task, so that we cannot get back to it accidentally (via an untimely ^C or jlbacktrace in jl_exit)
-        ptls->pgcstack = NULL;
         ptls->safe_restore = NULL;
         if (ptls->current_task) {
+            ptls->current_task->gcstack = NULL;
             ptls->current_task->eh = NULL;
             ptls->current_task->excstack = NULL;
         }

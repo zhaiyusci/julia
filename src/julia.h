@@ -745,11 +745,11 @@ extern JL_DLLIMPORT jl_value_t *jl_nothing JL_GLOBALLY_ROOTED;
 
 // gc -------------------------------------------------------------------------
 
-typedef struct _jl_gcframe_t {
+struct _jl_gcframe_t {
     size_t nroots;
     struct _jl_gcframe_t *prev;
     // actual roots go here
-} jl_gcframe_t;
+};
 
 // NOTE: it is the caller's responsibility to make sure arguments are
 // rooted such that the gc can see them on the stack.
@@ -1807,6 +1807,10 @@ typedef struct _jl_task_t {
     uint8_t _isexception; // set if `result` is an exception to throw or that we exited with
 
 // hidden state:
+    // saved gc stack top for context switches
+    jl_gcframe_t *gcstack;
+    // quick lookup for current ptls
+    jl_tls_states_t *ptls; // == jl_all_tls_states[tid]
     // id of owning thread - does not need to be defined until the task runs
     int16_t tid;
     // multiqueue priority
@@ -1831,11 +1835,6 @@ typedef struct _jl_task_t {
     size_t bufsz; // actual sizeof stkbuf
     unsigned int copy_stack:31; // sizeof stack for copybuf
     unsigned int started:1;
-
-    jl_tls_states_t *ptls;
-
-    // saved gc stack top for context switches
-    jl_gcframe_t *gcstack;
 } jl_task_t;
 
 #define JL_TASK_STATE_RUNNABLE 0
@@ -2113,7 +2112,7 @@ typedef struct {
     float value;
 } jl_nullable_float32_t;
 
-#define jl_current_task (jl_get_ptls_states()->current_task)
+#define jl_current_task (container_of(jl_get_pgcstack(), jl_task_t, gcstack))
 #define jl_root_task (jl_get_ptls_states()->root_task)
 
 JL_DLLEXPORT jl_value_t *jl_get_current_task(void);
