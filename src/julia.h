@@ -9,6 +9,7 @@
 #define STORE_ARRAY_LEN
 //** End Configuration options **//
 
+#include "julia_fasttls.h"
 #include "libsupport.h"
 #include <stdint.h>
 #include <string.h>
@@ -90,7 +91,6 @@
 typedef struct _jl_taggedvalue_t jl_taggedvalue_t;
 
 #include "atomics.h"
-#include "tls.h"
 #include "julia_threads.h"
 #include "julia_assert.h"
 
@@ -1809,6 +1809,7 @@ typedef struct _jl_task_t {
 // hidden state:
     // saved gc stack top for context switches
     jl_gcframe_t *gcstack;
+    size_t world_age;
     // quick lookup for current ptls
     jl_tls_states_t *ptls; // == jl_all_tls_states[tid]
     // id of owning thread - does not need to be defined until the task runs
@@ -1848,6 +1849,8 @@ JL_DLLEXPORT void JL_NORETURN jl_rethrow(void);
 JL_DLLEXPORT void JL_NORETURN jl_sig_throw(void);
 JL_DLLEXPORT void JL_NORETURN jl_rethrow_other(jl_value_t *e JL_MAYBE_UNROOTED);
 JL_DLLEXPORT void JL_NORETURN jl_no_exc_handler(jl_value_t *e);
+JL_DLLEXPORT JL_CONST_FUNC jl_gcframe_t **(jl_get_pgcstack)(void) JL_GLOBALLY_ROOTED JL_NOTSAFEPOINT;
+#define jl_current_task (container_of(jl_get_pgcstack(), jl_task_t, gcstack))
 
 #include "locks.h"   // requires jl_task_t definition
 
@@ -2112,13 +2115,13 @@ typedef struct {
     float value;
 } jl_nullable_float32_t;
 
-#define jl_current_task (container_of(jl_get_pgcstack(), jl_task_t, gcstack))
 #define jl_root_task (jl_get_ptls_states()->root_task)
 
-JL_DLLEXPORT jl_value_t *jl_get_current_task(void);
+JL_DLLEXPORT jl_task_t *jl_get_current_task(void) JL_NOTSAFEPOINT;
 
-JL_DLLEXPORT jl_jmp_buf *jl_get_safe_restore(void);
-JL_DLLEXPORT void jl_set_safe_restore(jl_jmp_buf *);
+// TODO: we need to pin the task while using this (set pure bit)
+JL_DLLEXPORT jl_jmp_buf *jl_get_safe_restore(void) JL_NOTSAFEPOINT;
+JL_DLLEXPORT void jl_set_safe_restore(jl_jmp_buf *) JL_NOTSAFEPOINT;
 
 // codegen interface ----------------------------------------------------------
 // The root propagation here doesn't have to be literal, but callers should
@@ -2144,23 +2147,6 @@ typedef struct {
 } jl_cgparams_t;
 extern JL_DLLEXPORT jl_cgparams_t jl_default_cgparams;
 extern JL_DLLEXPORT int jl_default_debug_info_kind;
-
-#if !defined(_OS_DARWIN_) && !defined(_OS_WINDOWS_)
-#define JULIA_DEFINE_FAST_TLS()                                                             \
-JL_DLLEXPORT JL_CONST_FUNC jl_ptls_t jl_get_ptls_states_static(void)                        \
-{                                                                                           \
-    static __attribute__((tls_model("local-exec"))) __thread jl_tls_states_t tls_states;    \
-    return &tls_states;                                                                     \
-}                                                                                           \
-__attribute__((constructor)) void jl_register_ptls_states_getter(void)                      \
-{                                                                                           \
-    /* We need to make sure this function is called before any reference to */              \
-    /* TLS variables. */                                                                    \
-    jl_set_ptls_states_getter(jl_get_ptls_states_static);                                   \
-}
-#else
-#define JULIA_DEFINE_FAST_TLS()
-#endif
 
 #ifdef __cplusplus
 }

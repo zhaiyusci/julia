@@ -56,7 +56,8 @@ private:
     Type *T_int8;
     Type *T_size;
     PointerType *T_pint8;
-    GlobalVariable *pgcstack_slot{nullptr};
+    GlobalVariable *pgcstack_func_slot{nullptr};
+    GlobalVariable *pgcstack_key_slot{nullptr};
     GlobalVariable *pgcstack_offset{nullptr};
     void set_pgcstack_attrs(CallInst *pgcstack) const;
     Instruction *emit_pgcstack_tp(Value *offset, Instruction *insertBefore) const;
@@ -74,6 +75,7 @@ void LowerPTLS::set_pgcstack_attrs(CallInst *pgcstack) const
 
 Instruction *LowerPTLS::emit_pgcstack_tp(Value *offset, Instruction *insertBefore) const
 {
+    Value *tls;
 #if defined(_CPU_X86_64_) || defined(_CPU_X86_)
     if (insertBefore->getFunction()->callsFunctionThatReturnsTwice()) {
         // Workaround LLVM bug by hiding the offset computation
@@ -95,7 +97,6 @@ Instruction *LowerPTLS::emit_pgcstack_tp(Value *offset, Instruction *insertBefor
 #  endif
 
         // The add instruction clobbers flags
-        Value *tls;
         if (offset) {
             std::vector<Type*> args(0);
             args.push_back(offset->getType());
@@ -109,33 +110,36 @@ Instruction *LowerPTLS::emit_pgcstack_tp(Value *offset, Instruction *insertBefor
                                      false);
             tls = CallInst::Create(tp, "pgcstack_i8", insertBefore);
         }
-        return new BitCastInst(tls, T_pppjlvalue, "pgcstack", insertBefore);
     }
+    else
 #endif
-    // AArch64/ARM doesn't seem to have this issue.
-    // (Possibly because there are many more registers and the offset is
-    // positive and small)
-    // It's also harder to emit the offset in a generic way on ARM/AArch64
-    // (need to generate one or two `add` with shift) so let llvm emit
-    // the add for now.
+    {
+        // AArch64/ARM doesn't seem to have this issue.
+        // (Possibly because there are many more registers and the offset is
+        // positive and small)
+        // It's also harder to emit the offset in a generic way on ARM/AArch64
+        // (need to generate one or two `add` with shift) so let llvm emit
+        // the add for now.
 #if defined(_CPU_AARCH64_)
-    const char *asm_str = "mrs $0, tpidr_el0";
+        const char *asm_str = "mrs $0, tpidr_el0";
 #elif defined(__ARM_ARCH) && __ARM_ARCH >= 7
-    const char *asm_str = "mrc p15, 0, $0, c13, c0, 3";
+        const char *asm_str = "mrc p15, 0, $0, c13, c0, 3";
 #elif defined(_CPU_X86_64_)
-    const char *asm_str = "movq %fs:0, $0";
+        const char *asm_str = "movq %fs:0, $0";
 #elif defined(_CPU_X86_)
-    const char *asm_str = "movl %gs:0, $0";
+        const char *asm_str = "movl %gs:0, $0";
 #else
-    const char *asm_str = nullptr;
-    assert(0 && "Cannot emit thread pointer for this architecture.");
+        const char *asm_str = nullptr;
+        assert(0 && "Cannot emit thread pointer for this architecture.");
 #endif
-    if (!offset)
-        offset = ConstantInt::getSigned(T_size, jl_tls_offset);
-    auto tp = InlineAsm::get(FunctionType::get(T_pint8, false), asm_str, "=r", false);
-    Value *tls = CallInst::Create(tp, "thread_ptr", insertBefore);
-    tls = GetElementPtrInst::Create(T_int8, tls, {offset}, "pgcstack_i8", insertBefore);
-    return new BitCastInst(tls, T_pppjlvalue, "pgcstack", insertBefore);
+        if (!offset)
+            offset = ConstantInt::getSigned(T_size, jl_tls_offset);
+        auto tp = InlineAsm::get(FunctionType::get(T_pint8, false), asm_str, "=r", false);
+        tls = CallInst::Create(tp, "thread_ptr", insertBefore);
+        tls = GetElementPtrInst::Create(T_int8, tls, {offset}, "ppgcstack_i8", insertBefore);
+    }
+    tls = new BitCastInst(tls, T_pppjlvalue->getPointerTo(), "ppgcstack", insertBefore);
+    return new LoadInst(T_pppjlvalue, tls, "pgcstack", false, insertBefore);
 }
 
 GlobalVariable *LowerPTLS::create_aliased_global(Type *T, StringRef name) const
@@ -202,7 +206,7 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
             auto phi = PHINode::Create(T_pppjlvalue, 2, "", pgcstack);
             pgcstack->replaceAllUsesWith(phi);
             pgcstack->moveBefore(slowTerm);
-            auto getter = new LoadInst(T_pgcstack_getter, pgcstack_slot, "", false, pgcstack);
+            auto getter = new LoadInst(T_pgcstack_getter, pgcstack_func_slot, "", false, pgcstack);
             getter->setMetadata(llvm::LLVMContext::MD_tbaa, tbaa_const);
             getter->setMetadata(llvm::LLVMContext::MD_invariant_load, MDNode::get(*ctx, None));
             pgcstack->setCalledFunction(pgcstack->getFunctionType(), getter);
@@ -217,10 +221,21 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
         // variable to be filled (in `staticdata.c`) at initialization time of the sysimg.
         // This way we can bypass the extra indirection in `jl_get_pgcstack`
         // since we may not know which getter function to use ahead of time.
-        auto getter = new LoadInst(T_pgcstack_getter, pgcstack_slot, "", false, pgcstack);
+        auto getter = new LoadInst(T_pgcstack_getter, pgcstack_func_slot, "", false, pgcstack);
         getter->setMetadata(llvm::LLVMContext::MD_tbaa, tbaa_const);
         getter->setMetadata(llvm::LLVMContext::MD_invariant_load, MDNode::get(*ctx, None));
+#if defined(_OS_DARWIN_)
+        auto key = new LoadInst(T_size, pgcstack_key_slot, "", false, pgcstack);
+        key->setMetadata(llvm::LLVMContext::MD_tbaa, tbaa_const);
+        key->setMetadata(llvm::LLVMContext::MD_invariant_load, MDNode::get(*ctx, None));
+        auto new_pgcstack = CallInst::Create(T_pgcstack_getter, getter, {key}, "", pgcstack);
+        new_pgcstack->takeName(pgcstack);
+        pgcstack->replaceAllUsesWith(new_pgcstack);
+        pgcstack->eraseFromParent();
+        pgcstack = new_pgcstack;
+#else
         pgcstack->setCalledFunction(pgcstack->getFunctionType(), getter);
+#endif
         set_pgcstack_attrs(pgcstack);
     }
     else if (jl_tls_offset != -1) {
@@ -229,8 +244,27 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
     }
     else {
         // use the address of the actual getter function directly
-        auto val = ConstantInt::get(T_size, (uintptr_t)jl_get_pgcstack_getter());
-        pgcstack->setCalledFunction(pgcstack->getFunctionType(), ConstantExpr::getIntToPtr(val, T_pgcstack_getter));
+        jl_get_pgcstack_func *f;
+#if defined(_OS_DARWIN_)
+        pthread_key_t k; // unsigned long
+#elif defined(_OS_WINDOWS_)
+        DWORD k;
+#else
+        jl_gcframe_t ***(*k)(void);
+#endif
+        jl_pgcstack_getkey(&f, &k);
+        Constant *val = ConstantInt::get(T_size, (uintptr_t)f);
+        val = ConstantExpr::getIntToPtr(val, T_pgcstack_getter);
+#if defined(_OS_DARWIN_)
+        Constant *key = ConstantInt::get(T_size, (uintptr_t)k);
+        auto new_pgcstack = CallInst::Create(T_pgcstack_getter, val, {key}, "", pgcstack);
+        new_pgcstack->takeName(pgcstack);
+        pgcstack->replaceAllUsesWith(new_pgcstack);
+        pgcstack->eraseFromParent();
+        pgcstack = new_pgcstack;
+#else
+        pgcstack->setCalledFunction(pgcstack->getFunctionType(), val);
+#endif
         set_pgcstack_attrs(pgcstack);
     }
 }
@@ -246,6 +280,10 @@ bool LowerPTLS::runOnModule(Module &_M)
     tbaa_const = tbaa_make_child("jtbaa_const", nullptr, true).first;
 
     auto FT_pgcstack_getter = pgcstack_getter->getFunctionType();
+#if defined(_OS_DARWIN_)
+    assert(sizeof(key) == sizeof(unsigned long));
+    FT_pgcstack_getter = FunctionType::get(FT_pgcstack_getter->getReturnType(), {key->getType()});
+#endif
     T_pgcstack_getter = FT_pgcstack_getter->getPointerTo();
     T_pppjlvalue = cast<PointerType>(FT_pgcstack_getter->getReturnType());
     T_ppjlvalue = cast<PointerType>(T_pppjlvalue->getElementType());
@@ -253,7 +291,8 @@ bool LowerPTLS::runOnModule(Module &_M)
     T_size = sizeof(size_t) == 8 ? Type::getInt64Ty(*ctx) : Type::getInt32Ty(*ctx);
     T_pint8 = T_int8->getPointerTo();
     if (imaging_mode) {
-        pgcstack_slot = create_aliased_global(T_pgcstack_getter, "jl_get_pgcstack_slot");
+        pgcstack_func_slot = create_aliased_global(T_pgcstack_getter, "jl_pgcstack_func_slot");
+        pgcstack_key_slot = create_aliased_global(T_size, "jl_pgcstack_key_slot");
         pgcstack_offset = create_aliased_global(T_size, "jl_tls_offset");
     }
 

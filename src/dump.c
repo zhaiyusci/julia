@@ -1129,10 +1129,11 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp, jl_array_t *
     if (!unique_func)
         unique_func = jl_get_global(jl_base_module, jl_symbol("unique"));
     jl_value_t *uniqargs[2] = {unique_func, (jl_value_t*)deps};
-    size_t last_age = jl_get_ptls_states()->world_age;
-    jl_get_ptls_states()->world_age = jl_world_counter;
+    jl_task_t *ct = jl_current_task;
+    size_t last_age = ct->world_age;
+    ct->world_age = jl_world_counter;
     jl_array_t *udeps = (*udepsp = deps && unique_func ? (jl_array_t*)jl_apply(uniqargs, 2) : NULL);
-    jl_get_ptls_states()->world_age = last_age;
+    ct->world_age = last_age;
 
     // write a placeholder for total size so that we can quickly seek past all of the
     // dependencies if we don't need them
@@ -1180,8 +1181,8 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp, jl_array_t *
 
             if (toplevel && prefs_hash_func && get_compiletime_prefs_func) {
                 // Temporary invoke in newest world age
-                size_t last_age = jl_get_ptls_states()->world_age;
-                jl_get_ptls_states()->world_age = jl_world_counter;
+                size_t last_age = ct->world_age;
+                ct->world_age = jl_world_counter;
 
                 // call get_compiletime_prefs(__toplevel__)
                 jl_value_t *args[3] = {get_compiletime_prefs_func, (jl_value_t*)toplevel, NULL};
@@ -1193,7 +1194,7 @@ static int64_t write_dependency_list(ios_t *s, jl_array_t **udepsp, jl_array_t *
                 prefs_hash = (jl_value_t*)jl_apply(args, 3);
 
                 // Reset world age to normal
-                jl_get_ptls_states()->world_age = last_age;
+                ct->world_age = last_age;
             }
         }
 
@@ -2226,7 +2227,7 @@ JL_DLLEXPORT int jl_save_incremental(const char *fname, jl_array_t *worklist)
 
     jl_serializer_state s = {
         &f,
-        jl_get_ptls_states(),
+        jl_current_task->ptls,
         mod_array
     };
     jl_serialize_value(&s, worklist);
@@ -2537,7 +2538,7 @@ static int trace_method(jl_typemap_entry_t *entry, void *closure)
 static jl_value_t *_jl_restore_incremental(ios_t *f, jl_array_t *mod_array)
 {
     JL_TIMING(LOAD_MODULE);
-    jl_ptls_t ptls = jl_get_ptls_states();
+    jl_task_t *ct = jl_current_task;
     if (ios_eof(f) || !jl_read_verify_header(f)) {
         ios_close(f);
         return jl_get_exceptionf(jl_errorexception_type,
@@ -2568,7 +2569,7 @@ static jl_value_t *_jl_restore_incremental(ios_t *f, jl_array_t *mod_array)
 
     // prepare to deserialize
     int en = jl_gc_enable(0);
-    jl_gc_enable_finalizers(ptls, 0);
+    jl_gc_enable_finalizers(ct, 0);
     ++jl_world_counter; // reserve a world age for the deserialization
 
     arraylist_new(&backref_list, 4000);
@@ -2579,7 +2580,7 @@ static jl_value_t *_jl_restore_incremental(ios_t *f, jl_array_t *mod_array)
 
     jl_serializer_state s = {
         f,
-        ptls,
+        ct->ptls,
         mod_array
     };
     jl_array_t *restored = (jl_array_t*)jl_deserialize_value(&s, (jl_value_t**)&restored);
@@ -2614,7 +2615,7 @@ static jl_value_t *_jl_restore_incremental(ios_t *f, jl_array_t *mod_array)
     arraylist_free(&backref_list);
     ios_close(f);
 
-    jl_gc_enable_finalizers(ptls, 1); // make sure we don't run any Julia code concurrently before this point
+    jl_gc_enable_finalizers(ct, 1); // make sure we don't run any Julia code concurrently before this point
     if (tracee_list) {
         jl_methtable_t *mt;
         while ((mt = (jl_methtable_t*)arraylist_pop(tracee_list)) != NULL) {
@@ -2659,7 +2660,7 @@ JL_DLLEXPORT jl_value_t *jl_restore_incremental(const char *fname, jl_array_t *m
 
 void jl_init_serializer(void)
 {
-    jl_ptls_t ptls = jl_get_ptls_states();
+    jl_task_t *ct = jl_current_task;
     htable_new(&ser_tag, 0);
     htable_new(&common_symbol_tag, 0);
     htable_new(&backref_table, 0);
@@ -2704,7 +2705,7 @@ void jl_init_serializer(void)
                      jl_type_type_mt, jl_nonfunction_mt,
                      jl_opaque_closure_type,
 
-                     ptls->root_task,
+                     ct->ptls->root_task,
 
                      NULL };
 

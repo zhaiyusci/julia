@@ -2019,9 +2019,9 @@ static jl_value_t *static_apply_type(jl_codectx_t &ctx, const jl_cgval_t *args, 
         v[i] = args[i].constant;
     }
     assert(v[0] == jl_builtin_apply_type);
-    size_t last_age = jl_get_ptls_states()->world_age;
+    size_t last_age = jl_current_task->world_age;
     // call apply_type, but ignore errors. we know that will work in world 1.
-    jl_get_ptls_states()->world_age = 1;
+    jl_current_task->world_age = 1;
     jl_value_t *result;
     JL_TRY {
         result = jl_apply(v, nargs);
@@ -2029,7 +2029,7 @@ static jl_value_t *static_apply_type(jl_codectx_t &ctx, const jl_cgval_t *args, 
     JL_CATCH {
         result = NULL;
     }
-    jl_get_ptls_states()->world_age = last_age;
+    jl_current_task->world_age = last_age;
     return result;
 }
 
@@ -2105,9 +2105,9 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
                             return NULL;
                         }
                     }
-                    size_t last_age = jl_get_ptls_states()->world_age;
+                    size_t last_age = jl_current_task->world_age;
                     // here we know we're calling specific builtin functions that work in world 1.
-                    jl_get_ptls_states()->world_age = 1;
+                    jl_current_task->world_age = 1;
                     jl_value_t *result;
                     JL_TRY {
                         result = jl_apply(v, n+1);
@@ -2115,7 +2115,7 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
                     JL_CATCH {
                         result = NULL;
                     }
-                    jl_get_ptls_states()->world_age = last_age;
+                    jl_current_task->world_age = last_age;
                     JL_GC_POP();
                     return result;
                 }
@@ -4781,12 +4781,12 @@ static Value *get_current_ptls(jl_codectx_t &ctx)
 // called right after `allocate_gc_frame` and there should be no context switch.
 static void emit_last_age_field(jl_codectx_t &ctx)
 {
-    auto ptls = get_current_ptls(ctx);
+    auto ptls = get_current_task(ctx);
     assert(ctx.builder.GetInsertBlock() == ctx.pgcstack->getParent());
     ctx.world_age_field = ctx.builder.CreateInBoundsGEP(
             T_size,
             ctx.builder.CreateBitCast(ptls, T_psize),
-            ConstantInt::get(T_size, offsetof(jl_tls_states_t, world_age) / sizeof(size_t)),
+            ConstantInt::get(T_size, offsetof(jl_task_t, world_age) / sizeof(size_t)),
             "world_age");
 }
 
@@ -5025,14 +5025,11 @@ static Function* gen_cfun_wrapper(
     emit_last_age_field(ctx);
 
     Value *dummy_world = ctx.builder.CreateAlloca(T_size);
-    Value *have_tls = ctx.builder.CreateIsNotNull(get_current_ptls(ctx));
+    Value *have_tls = ctx.builder.CreateIsNotNull(ctx.pgcstack);
     // TODO: in the future, try to initialize a full TLS context here
     // for now, just use a dummy field to avoid a branch in this function
     ctx.world_age_field = ctx.builder.CreateSelect(have_tls, ctx.world_age_field, dummy_world);
     Value *last_age = tbaa_decorate(tbaa_gcframe, ctx.builder.CreateAlignedLoad(ctx.world_age_field, Align(sizeof(size_t))));
-    Value *valid_tls = ctx.builder.CreateIsNotNull(last_age);
-    have_tls = ctx.builder.CreateAnd(have_tls, valid_tls);
-    ctx.world_age_field = ctx.builder.CreateSelect(valid_tls, ctx.world_age_field, dummy_world);
     Value *world_v = ctx.builder.CreateAlignedLoad(prepare_global_in(jl_Module, jlgetworld_global), Align(sizeof(size_t)));
     // TODO: cast<LoadInst>(world_v)->setOrdering(AtomicOrdering::Monotonic);
 

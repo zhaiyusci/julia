@@ -1287,22 +1287,6 @@ static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
     };
 #define is_libjulia_func(name) _is_libjulia_func((uintptr_t)&(name), #name)
 
-    static jl_ptls_t (*ptls_getter)(void) = [] {
-    // directly accessing the address of an ifunc can cause compile-time linker issues
-    // on some configurations (e.g. AArch64 + -Bsymbolic-functions), so we guard the
-    // `&jl_get_ptls_states` within this `#ifdef` guard, and use a more roundabout
-    // method involving `jl_dlsym()` on Linux platforms instead.
-#ifdef _OS_LINUX_
-        jl_ptls_t (*p)(void);
-        void *handle = jl_dlopen(nullptr, 0);
-        jl_dlsym(handle, "jl_get_ptls_states", (void **)&p, 0);
-        jl_dlclose(handle);
-        return p;
-#else
-        return &jl_get_ptls_states;
-#endif
-    }();
-
     // emit arguments
     jl_cgval_t *argv = (jl_cgval_t*)alloca(sizeof(jl_cgval_t) * nccallargs);
     for (size_t i = 0; i < nccallargs; i++) {
@@ -1479,7 +1463,7 @@ static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
         emit_signal_fence(ctx);
         return ghostValue(jl_nothing_type);
     }
-    else if (_is_libjulia_func((uintptr_t)ptls_getter, "jl_get_ptls_states")) {
+    else if (is_libjulia_func("jl_get_ptls_states")) {
         assert(lrt == T_size);
         assert(!isVa && !llvmcall && nccallargs == 0);
         JL_GC_POP();
