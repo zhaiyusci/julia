@@ -189,13 +189,13 @@ JL_DLLEXPORT void jl_pgcstack_setkey(jl_get_pgcstack_func *f, DWORD k)
 // version as the symbol address if we didn't find the static version in `ifunc`.
 
 // fallback provided for embedding
-static jl_gcframe_t ***(*jl_pgcstack_key)(void);
+static jl_pgcstack_key_t jl_pgcstack_key;
 static __thread jl_gcframe_t **pgcstack_;
-static jl_gcframe_t **jl_get_pgcstack_fallback(void)
+static jl_gcframe_t **jl_get_pgcstack_fallback(void) JL_NOTSAFEPOINT
 {
     return pgcstack_;
 }
-static jl_gcframe_t ***jl_pgcstack_addr_fallback(void)
+static jl_gcframe_t ***jl_pgcstack_addr_fallback(void) JL_NOTSAFEPOINT
 {
     return &pgcstack_;
 }
@@ -231,7 +231,7 @@ static jl_gcframe_t **jl_get_pgcstack_init(void)
     return jl_get_pgcstack_cb();
 }
 
-JL_DLLEXPORT void jl_pgcstack_setkey(jl_get_pgcstack_func *f, jl_gcframe_t ***(*k)(void))
+JL_DLLEXPORT void jl_pgcstack_setkey(jl_get_pgcstack_func *f, jl_pgcstack_key_t k)
 {
     if (f == jl_get_pgcstack_cb || !f)
         return;
@@ -251,7 +251,7 @@ JL_DLLEXPORT jl_gcframe_t **jl_get_pgcstack(void) JL_GLOBALLY_ROOTED
 #endif
 }
 
-void jl_pgcstack_getkey(jl_get_pgcstack_func **f, jl_gcframe_t ***(**k)(void))
+void jl_pgcstack_getkey(jl_get_pgcstack_func **f, jl_pgcstack_key_t *k)
 {
     if (jl_get_pgcstack_cb == jl_get_pgcstack_init)
         jl_get_pgcstack_init();

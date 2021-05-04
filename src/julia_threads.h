@@ -219,9 +219,7 @@ typedef struct _jl_tls_states_t {
     volatile sig_atomic_t defer_signal;
     struct _jl_task_t *current_task;
     struct _jl_task_t *next_task;
-#ifdef MIGRATE_TASKS
     struct _jl_task_t *previous_task;
-#endif
     struct _jl_task_t *root_task;
     struct _jl_timing_block_t *timing_stack;
     void *stackbase;

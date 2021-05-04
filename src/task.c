@@ -484,14 +484,8 @@ JL_DLLEXPORT void jl_switch(void)
         jl_error("task switch not allowed from inside gc finalizer");
     if (ptls->in_pure_callback)
         jl_error("task switch not allowed from inside staged nor pure functions");
-    if (t->sticky && jl_atomic_load_acquire(&t->tid) == -1) {
-        // manually yielding to a task
-        if (jl_atomic_compare_exchange(&t->tid, -1, ptls->tid) != -1)
-            jl_error("cannot switch to task running on another thread");
-    }
-    else if (t->tid != ptls->tid) {
+    if (!jl_set_task_tid(t, ptls->tid)) // manually yielding to a task
         jl_error("cannot switch to task running on another thread");
-    }
 
     // Store old values on the stack and reset
     sig_atomic_t defer_signal = ptls->defer_signal;
@@ -511,9 +505,10 @@ JL_DLLEXPORT void jl_switch(void)
 #ifdef MIGRATE_TASKS
     ptls = ct->ptls;
     t = ptls->previous_task;
+    assert(t != ct);
     assert(t->tid == ptls->tid);
     if (!t->sticky && !t->copy_stack)
-        jl_atomic_store_release(t->tid, -1);
+        jl_atomic_store_release(&t->tid, -1);
 #else
     assert(ptls == ct->ptls);
 #endif
@@ -561,11 +556,8 @@ JL_DLLEXPORT JL_NORETURN void jl_no_exc_handler(jl_value_t *e)
 }
 
 // yield to exception handler
-static void JL_NORETURN throw_internal(jl_value_t *exception JL_MAYBE_UNROOTED)
+static void JL_NORETURN throw_internal(jl_task_t *ct, jl_value_t *exception JL_MAYBE_UNROOTED)
 {
-    jl_task_t *ct = jl_current_task;
-    if (!ct->world_age) // During startup
-        jl_no_exc_handler(exception);
     jl_ptls_t ptls = ct->ptls;
     ptls->io_wait = 0;
     // @time needs its compile timer disabled on error,
@@ -605,21 +597,26 @@ static void JL_NORETURN throw_internal(jl_value_t *exception JL_MAYBE_UNROOTED)
 // record backtrace and raise an error
 JL_DLLEXPORT void jl_throw(jl_value_t *e JL_MAYBE_UNROOTED)
 {
-    jl_ptls_t ptls = jl_current_task->ptls;
     assert(e != NULL);
-    if (jl_get_safe_restore())
-        throw_internal(NULL);
-    record_backtrace(ptls, 1);
-    throw_internal(e);
+    jl_jmp_buf *safe_restore = jl_get_safe_restore();
+    if (safe_restore)
+        jl_longjmp(*safe_restore, 1);
+    jl_task_t *ct = jl_get_current_task();
+    if (ct == NULL) // During startup
+        jl_no_exc_handler(e);
+    JL_GC_PROMISE_ROOTED(ct);
+    record_backtrace(ct->ptls, 1);
+    throw_internal(ct, e);
 }
 
 // rethrow with current excstack state
 JL_DLLEXPORT void jl_rethrow(void)
 {
-    jl_excstack_t *excstack = jl_current_task->excstack;
+    jl_task_t *ct = jl_current_task;
+    jl_excstack_t *excstack = ct->excstack;
     if (!excstack || excstack->top == 0)
         jl_error("rethrow() not allowed outside a catch block");
-    throw_internal(NULL);
+    throw_internal(ct, NULL);
 }
 
 // Special case throw for errors detected inside signal handlers.  This is not
@@ -628,23 +625,25 @@ JL_DLLEXPORT void jl_rethrow(void)
 JL_DLLEXPORT void JL_NORETURN jl_sig_throw(void)
 {
 CFI_NORETURN
-    jl_ptls_t ptls = jl_current_task->ptls;
+    jl_task_t *ct = jl_current_task;
+    jl_ptls_t ptls = ct->ptls;
     jl_value_t *e = ptls->sig_exception;
     ptls->sig_exception = NULL;
-    throw_internal(e);
+    throw_internal(ct, e);
 }
 
 JL_DLLEXPORT void jl_rethrow_other(jl_value_t *e JL_MAYBE_UNROOTED)
 {
     // TODO: Should uses of `rethrow(exc)` be replaced with a normal throw, now
     // that exception stacks allow root cause analysis?
-    jl_excstack_t *excstack = jl_current_task->excstack;
+    jl_task_t *ct = jl_current_task;
+    jl_excstack_t *excstack = ct->excstack;
     if (!excstack || excstack->top == 0)
         jl_error("rethrow(exc) not allowed outside a catch block");
     // overwrite exception on top of stack. see jl_excstack_exception
     jl_excstack_raw(excstack)[excstack->top-1].jlvalue = e;
     JL_GC_PROMISE_ROOTED(e);
-    throw_internal(NULL);
+    throw_internal(ct, NULL);
 }
 
 JL_DLLEXPORT jl_task_t *jl_new_task(jl_function_t *start, jl_value_t *completion_future, size_t ssize)
@@ -786,11 +785,15 @@ STATIC_OR_JS void NOINLINE JL_NORETURN start_task(void)
 CFI_NORETURN
     // this runs the first time we switch to a task
     sanitizer_finish_switch_fiber();
+#ifdef __clang_analyzer__
+    jl_task_t *ct = jl_get_current_task();
+    JL_GC_PROMISE_ROOTED(ct);
+#else
     jl_task_t *ct = jl_current_task;
+#endif
     jl_ptls_t ptls = ct->ptls;
     jl_value_t *res;
     assert(ptls->finalizers_inhibited == 0);
-    JL_GC_PROMISE_ROOTED(ct);
 
 #ifdef MIGRATE_TASKS
     jl_task_t *pt = ptls->previous_task;

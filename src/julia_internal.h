@@ -730,12 +730,13 @@ void jl_wake_libuv(void);
 void jl_set_pgcstack(jl_gcframe_t **) JL_NOTSAFEPOINT;
 #if !defined(__clang_analyzer__)
 #if defined(_OS_DARWIN_)
-void jl_pgcstack_getkey(jl_get_pgcstack_func **f, pthread_key_t *k);
+typedef pthread_key_t jl_pgcstack_key_t;
 #elif defined(_OS_WINDOWS_)
-void jl_pgcstack_getkey(jl_get_pgcstack_func **f, DWORD *k);
+typedef DWORD jl_pgcstack_key_t;
 #else
-void jl_pgcstack_getkey(jl_get_pgcstack_func **f, jl_gcframe_t ***(**k)(void));
+typedef jl_gcframe_t ***(*jl_pgcstack_key_t)(void) JL_NOTSAFEPOINT;
 #endif
+void jl_pgcstack_getkey(jl_get_pgcstack_func **f, jl_pgcstack_key_t *k);
 static inline void jl_set_gc_and_wait(void)
 {
     jl_task_t *ct = jl_current_task;

@@ -342,16 +342,7 @@ static void jl_load_sysimg_so(void)
         jl_dlsym(jl_sysimg_handle, "jl_pgcstack_func_slot", &pgcstack_func_slot, 1);
         void *pgcstack_key_slot;
         jl_dlsym(jl_sysimg_handle, "jl_pgcstack_key_slot", &pgcstack_key_slot, 1);
-        jl_pgcstack_getkey((jl_get_pgcstack_func**)pgcstack_func_slot,
-#if defined(_OS_DARWIN_)
-            (pthread_key_t*)pgcstack_key_slot
-#elif defined(_OS_WINDOWS_)
-            (DWORD*)pgcstack_key_slot
-#else
-            (jl_gcframe_t ***(**)(void))pgcstack_key_slot
-#endif
-            );
-
+        jl_pgcstack_getkey((jl_get_pgcstack_func**)pgcstack_func_slot, (jl_pgcstack_key_t*)pgcstack_key_slot);
 
         size_t *tls_offset_idx;
         jl_dlsym(jl_sysimg_handle, "jl_tls_offset", (void **)&tls_offset_idx, 1);

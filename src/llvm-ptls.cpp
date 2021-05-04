@@ -245,17 +245,12 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
     else {
         // use the address of the actual getter function directly
         jl_get_pgcstack_func *f;
-#if defined(_OS_DARWIN_)
-        pthread_key_t k; // unsigned long
-#elif defined(_OS_WINDOWS_)
-        DWORD k;
-#else
-        jl_gcframe_t ***(*k)(void);
-#endif
+        jl_pgcstack_key_t k;
         jl_pgcstack_getkey(&f, &k);
         Constant *val = ConstantInt::get(T_size, (uintptr_t)f);
         val = ConstantExpr::getIntToPtr(val, T_pgcstack_getter);
 #if defined(_OS_DARWIN_)
+        assert(sizeof(k) == sizeof(uintptr_t));
         Constant *key = ConstantInt::get(T_size, (uintptr_t)k);
         auto new_pgcstack = CallInst::Create(T_pgcstack_getter, val, {key}, "", pgcstack);
         new_pgcstack->takeName(pgcstack);
@@ -292,7 +287,7 @@ bool LowerPTLS::runOnModule(Module &_M)
     T_pint8 = T_int8->getPointerTo();
     if (imaging_mode) {
         pgcstack_func_slot = create_aliased_global(T_pgcstack_getter, "jl_pgcstack_func_slot");
-        pgcstack_key_slot = create_aliased_global(T_size, "jl_pgcstack_key_slot");
+        pgcstack_key_slot = create_aliased_global(T_size, "jl_pgcstack_key_slot"); // >= sizeof(jl_pgcstack_key_t)
         pgcstack_offset = create_aliased_global(T_size, "jl_tls_offset");
     }
 
