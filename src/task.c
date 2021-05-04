@@ -505,6 +505,7 @@ JL_DLLEXPORT void jl_switch(void)
 #ifdef MIGRATE_TASKS
     ptls = ct->ptls;
     t = ptls->previous_task;
+    ptls->previous_task = NULL;
     assert(t != ct);
     assert(t->tid == ptls->tid);
     if (!t->sticky && !t->copy_stack)
@@ -797,8 +798,9 @@ CFI_NORETURN
 
 #ifdef MIGRATE_TASKS
     jl_task_t *pt = ptls->previous_task;
+    ptls->previous_task = NULL;
     if (!pt->sticky && !pt->copy_stack)
-        pt->tid = -1;
+        jl_atomic_store_release(&pt->tid, -1);
 #endif
 
     ct->started = 1;
