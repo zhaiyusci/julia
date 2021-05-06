@@ -50,6 +50,7 @@ private:
     Function *pgcstack_getter;
     LLVMContext *ctx;
     MDNode *tbaa_const;
+    FunctionType *FT_pgcstack_getter;
     PointerType *T_pgcstack_getter;
     PointerType *T_ppjlvalue;
     PointerType *T_pppjlvalue;
@@ -228,7 +229,7 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
         auto key = new LoadInst(T_size, pgcstack_key_slot, "", false, pgcstack);
         key->setMetadata(llvm::LLVMContext::MD_tbaa, tbaa_const);
         key->setMetadata(llvm::LLVMContext::MD_invariant_load, MDNode::get(*ctx, None));
-        auto new_pgcstack = CallInst::Create(T_pgcstack_getter, getter, {key}, "", pgcstack);
+        auto new_pgcstack = CallInst::Create(FT_pgcstack_getter, getter, {key}, "", pgcstack);
         new_pgcstack->takeName(pgcstack);
         pgcstack->replaceAllUsesWith(new_pgcstack);
         pgcstack->eraseFromParent();
@@ -252,7 +253,7 @@ void LowerPTLS::fix_pgcstack_use(CallInst *pgcstack)
 #if defined(_OS_DARWIN_)
         assert(sizeof(k) == sizeof(uintptr_t));
         Constant *key = ConstantInt::get(T_size, (uintptr_t)k);
-        auto new_pgcstack = CallInst::Create(T_pgcstack_getter, val, {key}, "", pgcstack);
+        auto new_pgcstack = CallInst::Create(FT_pgcstack_getter, val, {key}, "", pgcstack);
         new_pgcstack->takeName(pgcstack);
         pgcstack->replaceAllUsesWith(new_pgcstack);
         pgcstack->eraseFromParent();
@@ -274,17 +275,17 @@ bool LowerPTLS::runOnModule(Module &_M)
     ctx = &M->getContext();
     tbaa_const = tbaa_make_child("jtbaa_const", nullptr, true).first;
 
-    auto FT_pgcstack_getter = pgcstack_getter->getFunctionType();
+    T_int8 = Type::getInt8Ty(*ctx);
+    T_size = sizeof(size_t) == 8 ? Type::getInt64Ty(*ctx) : Type::getInt32Ty(*ctx);
+    T_pint8 = T_int8->getPointerTo();
+    FT_pgcstack_getter = pgcstack_getter->getFunctionType();
 #if defined(_OS_DARWIN_)
-    assert(sizeof(key) == sizeof(unsigned long));
-    FT_pgcstack_getter = FunctionType::get(FT_pgcstack_getter->getReturnType(), {key->getType()});
+    assert(sizeof(jl_pgcstack_key_t) == sizeof(uintptr_t));
+    FT_pgcstack_getter = FunctionType::get(FT_pgcstack_getter->getReturnType(), {T_size}, false);
 #endif
     T_pgcstack_getter = FT_pgcstack_getter->getPointerTo();
     T_pppjlvalue = cast<PointerType>(FT_pgcstack_getter->getReturnType());
     T_ppjlvalue = cast<PointerType>(T_pppjlvalue->getElementType());
-    T_int8 = Type::getInt8Ty(*ctx);
-    T_size = sizeof(size_t) == 8 ? Type::getInt64Ty(*ctx) : Type::getInt32Ty(*ctx);
-    T_pint8 = T_int8->getPointerTo();
     if (imaging_mode) {
         pgcstack_func_slot = create_aliased_global(T_pgcstack_getter, "jl_pgcstack_func_slot");
         pgcstack_key_slot = create_aliased_global(T_size, "jl_pgcstack_key_slot"); // >= sizeof(jl_pgcstack_key_t)

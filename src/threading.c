@@ -36,6 +36,13 @@ extern "C" {
 
 #include "threading.h"
 
+JL_DLLEXPORT void *jl_get_ptls_states(void)
+{
+    // mostly deprecated: use current_task instead
+    return jl_current_task->ptls;
+}
+
+#if !defined(_OS_WINDOWS_)
 static pthread_key_t jl_safe_restore_key;
 
 __attribute__((constructor)) void _jl_init_safe_restore(void)
@@ -52,13 +59,7 @@ JL_DLLEXPORT void jl_set_safe_restore(jl_jmp_buf *sr)
 {
     pthread_setspecific(jl_safe_restore_key, (void*)sr);
 }
-
-JL_DLLEXPORT void *jl_get_ptls_states(void)
-{
-    // mostly deprecated: use current_task instead
-    return jl_current_task->ptls;
-}
-
+#endif
 
 
 // The tls_states buffer:
@@ -92,7 +93,7 @@ JL_CONST_FUNC jl_gcframe_t **jl_get_pgcstack(void) JL_NOTSAFEPOINT
 
 void jl_set_pgcstack(jl_gcframe_t **pgcstack) JL_NOTSAFEPOINT
 {
-    pthread_setspecific(jl_pgcstack_key, pgcstack);
+    pthread_setspecific(jl_pgcstack_key, (void*)pgcstack);
 }
 
 void jl_pgcstack_getkey(jl_get_pgcstack_func **f, pthread_key_t *k)
@@ -113,6 +114,7 @@ JL_DLLEXPORT void jl_pgcstack_setkey(jl_get_pgcstack_func *f, pthread_key_t k)
 // reliably used from a shared library) either..... Use `TLSAlloc` instead.
 
 static DWORD jl_pgcstack_key;
+static DWORD jl_safe_restore_key;
 
 // Put this here for now. We can move this out later if we find more use for it.
 BOOLEAN WINAPI DllMain(IN HINSTANCE hDllHandle, IN DWORD nReason,
@@ -122,44 +124,67 @@ BOOLEAN WINAPI DllMain(IN HINSTANCE hDllHandle, IN DWORD nReason,
     case DLL_PROCESS_ATTACH:
         jl_pgcstack_key = TlsAlloc();
         assert(jl_pgcstack_key != TLS_OUT_OF_INDEXES);
+        jl_safe_restore_key = TlsAlloc();
+        assert(jl_safe_restore_key != TLS_OUT_OF_INDEXES);
         // Fall through
     case DLL_THREAD_ATTACH:
         break;
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
-        TlsFree(jl_tls_key);
+        TlsFree(jl_pgcstack_key);
+        TlsFree(jl_safe_restore_key);
         break;
     }
     return 1; // success
 }
 
+#if defined(_CPU_X86_64_)
+#define SAVE_ERRNO \
+    DWORD *plast_error = (DWORD*)(__readgsqword(0x30) + 0x68); \
+    DWORD last_error = *plast_error
+#define LOAD_ERRNO \
+    *plast_error = last_error
+#elif defined(_CPU_X86_)
+#define SAVE_ERRNO \
+    DWORD *plast_error = (DWORD*)(__readfsdword(0x18) + 0x34); \
+    DWORD last_error = *plast_error
+#define LOAD_ERRNO \
+    *plast_error = last_error
+#else
+#define SAVE_ERRNO \
+    DWORD last_error = GetLastError()
+#define LOAD_ERRNO \
+    SetLastError(last_error)
+#endif
+
+JL_DLLEXPORT jl_jmp_buf *jl_get_safe_restore(void)
+{
+    SAVE_ERRNO;
+    jl_jmp_buf *sr = (jl_jmp_buf*)TlsGetValue(jl_safe_restore_key);
+    LOAD_ERRNO;
+    return sr;
+}
+
+JL_DLLEXPORT void jl_set_safe_restore(jl_jmp_buf *sr)
+{
+    SAVE_ERRNO;
+    TlsSetValue(jl_safe_restore_key, (void*)sr);
+    LOAD_ERRNO;
+}
+
 JL_CONST_FUNC jl_gcframe_t **jl_get_pgcstack(void) JL_NOTSAFEPOINT
 {
-#if defined(_CPU_X86_64_)
-    DWORD *plast_error = (DWORD*)(__readgsqword(0x30) + 0x68);
-    DWORD last_error = *plast_error;
-#elif defined(_CPU_X86_)
-    DWORD *plast_error = (DWORD*)(__readfsdword(0x18) + 0x34);
-    DWORD last_error = *plast_error;
-#else
-    DWORD last_error = GetLastError();
-#endif
+    SAVE_ERRNO;
     jl_gcframe_t **pgcstack = (jl_ptls_t)TlsGetValue(jl_pgcstack_key);
-#if defined(_CPU_X86_64_)
-    *plast_error = last_error;
-#elif defined(_CPU_X86_)
-    *plast_error = last_error;
-#else
-    SetLastError(last_error);
-#endif
+    LOAD_ERRNO;
     return pgcstack;
 }
 
 void jl_set_pgcstack(jl_gcframe_t **pgcstack) JL_NOTSAFEPOINT
 {
     // n.b.: this smashes GetLastError
-    TlsSetValue(jl_pgcstack_key, pgcstack);
+    TlsSetValue(jl_pgcstack_key, (void*)pgcstack);
 }
 
 void jl_pgcstack_getkey(jl_get_pgcstack_func **f, DWORD *k)
