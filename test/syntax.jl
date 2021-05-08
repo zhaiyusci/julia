@@ -2787,3 +2787,100 @@ macro m_nospecialize_unnamed_hygiene()
 end
 
 @test @m_nospecialize_unnamed_hygiene()(1) === Any
+
+@testset "escaping newlines inside strings" begin
+    c = "c"
+
+    @test "a\
+b" == "ab"
+    @test "a\
+    b" == "a    b"
+    @test raw"a\
+b" == "a\\\nb"
+    @test "a$c\
+b" == "acb"
+    @test "\\
+" == "\\\n"
+
+
+    @test """
+          a\
+          b""" == "ab"
+    @test """
+          a\
+            b""" == "a  b"
+    @test """
+            a\
+          b""" == "  ab"
+    @test raw"""
+          a\
+          b""" == "a\\\nb"
+    @test """
+          a$c\
+          b""" == "acb"
+
+    @test """
+          \
+          """ == ""
+    @test """
+          \\
+          """ == "\\\n"
+    @test """
+          \\\
+          """ == "\\"
+    @test """
+          \\\\
+          """ == "\\\\\n"
+    @test """
+          \\\\\
+          """ == "\\\\"
+    @test """
+          \
+          \
+          """ == ""
+    @test """
+          \\
+          \
+          """ == "\\\n"
+    @test """
+          \\\
+          \
+          """ == "\\"
+
+
+    @test `a\
+b` == `ab`
+    @test `a\
+    b` == `a    b`
+    @test `a$c\
+b` == `acb`
+    @test `"a\
+b"` == `ab`
+    @test `'a\
+b'` == `ab`
+    @test `\\
+` == `'\'`
+
+
+    @test ```
+          a\
+          b``` == `ab`
+    @test ```
+          a\
+            b``` == `a  b`
+    @test ```
+            a\
+          b``` == `  ab`
+    @test ```
+          a$c\
+          b``` == `acb`
+    @test ```
+          "a\
+          b"``` == `ab`
+    @test ```
+          'a\
+          b'``` == `ab`
+    @test ```
+          \\
+          ``` == `'\'`
+end
