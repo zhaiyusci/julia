@@ -1,1 +1,2 @@
 /.github/workflows/ @JuliaLang/github-actions
+/stdlib/LinearAlgebra/ @AndreasNoack
