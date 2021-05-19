@@ -3270,3 +3270,6 @@ end == [Union{Some{Float64}, Some{Int}, Some{UInt8}}]
         true
     end
 end
+
+# issue #40742
+@test Base.return_types(string, (Vector{Tuple{:x}},)) == Any[String]
