@@ -17,6 +17,8 @@ Language changes
 
 * `macroexpand`, `@macroexpand`, and `@macroexpand1` no longer wrap errors in a `LoadError`. To reduce breakage, `@test_throws` has been modified so that many affected tests will still pass ([#38379]].
 * The middle dot `·` (`\cdotp` U+00b7) and the Greek interpunct `·` (U+0387) are now treated as equivalent to the dot operator `⋅` (`\cdot` U+22c5) (#25157).
+* The default random number generator has changed, so all random numbers will be different (even with the
+  same seed) unless an explicit RNG object is used. See the section on the `Random` standard library below.
 
 Compiler/Runtime improvements
 -----------------------------
@@ -30,7 +32,12 @@ Command-line option changes
 
 Multi-threading changes
 -----------------------
+
 * If the `JULIA_NUM_THREADS` environment variable is set to `auto`, then the number of threads will be set to the number of CPU threads ([#38952])
+* Every `Task` object has a local random number generator state, providing reproducible (schedule-independent) execution
+  of parallel simulation code by default. The default generator is also significantly faster in parallel than in
+  previous versions.
+
 
 Build system changes
 --------------------
@@ -112,6 +119,9 @@ Standard library changes
 
 #### Random
 
+* The default random number generator has been changed from Mersenne Twister to [Xoshiro256++](https://prng.di.unimi.it/).
+  The new generator has smaller state, better performance, and superior statistical properties.
+  This generator is the one used for reproducible Task-local randomness.
 
 #### REPL
 
