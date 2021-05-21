@@ -5,6 +5,7 @@ module XoshiroSimd
 import ..Random: TaskLocalRNG, rand, rand!, Xoshiro, CloseOpen01, UnsafeView,
                  SamplerType, SamplerTrivial
 using Base: BitInteger_types
+using Core.Intrinsics: llvmcall
 
 # Vector-width. Influences random stream. We may want to tune this before merging.
 xoshiroWidth() = Val(8)
@@ -20,7 +21,7 @@ simdThreshold(::Type{Bool}) = 4096
 @inline _and(x::UInt64, y::UInt64) = x & y
 @inline _or(x::UInt64, y::UInt64) = x | y
 @inline _lshr(x, y::Int32) = _lshr(x, y % Int64)
-@inline _lshr(x::UInt64, y::Int64) = Core.Intrinsics.llvmcall("""
+@inline _lshr(x::UInt64, y::Int64) = llvmcall("""
     %res = lshr i64 %0, %1
     ret i64 %res
     """,
@@ -28,10 +29,18 @@ simdThreshold(::Type{Bool}) = 4096
     Tuple{UInt64, Int64},
     x, y)
 
-@inline _minus1(x::UInt64, ::Type{Float64}) = reinterpret(UInt64, reinterpret(Float64, x) - 1.0)
-@inline function _minus1(x::UInt64, ::Type{Float32})
-    u = reinterpret(Float32, (x>>32) % UInt32) - 1.0f0
-    l = reinterpret(Float32, x % UInt32) - 1.0f0
+@inline _bits2float(x::UInt64, ::Type{Float64}) = reinterpret(UInt64, Float64(x >>> 11) * 0x1.0p-53)
+@inline function _bits2float(x::UInt64, ::Type{Float32})
+    #=
+    # this implementation uses more high bits, but is harder to vectorize
+    x = x >>> 16  # discard low 16 bits
+    u = Float32(x >>> 24) * Float32(0x1.0p-24)
+    l = Float32(x & 0x00ffffff) * Float32(0x1.0p-24)
+    =#
+    ui = (x>>>32) % UInt32
+    li = x % UInt32
+    u = Float32(ui >>> 8) * Float32(0x1.0p-24)
+    l = Float32(li >>> 8) * Float32(0x1.0p-24)
     (UInt64(reinterpret(UInt32, u)) << 32) | UInt64(reinterpret(UInt32, l))
 end
 
@@ -52,36 +61,31 @@ for N in [4,8,16]
         %res = shl <$N x i64> %0, %lshiftOp
         ret <$N x i64> %res
         """
-        @eval @inline _shl17(x::$VT) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT}, x)
+        @eval @inline _shl17(x::$VT) = llvmcall($code, $VT, Tuple{$VT}, x)
 
         code = """
         %res = add <$N x i64> %1, %0
         ret <$N x i64> %res
         """
-        @eval @inline _plus(x::$VT, y::$VT) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT, $VT}, x, y)
+        @eval @inline _plus(x::$VT, y::$VT) = llvmcall($code, $VT, Tuple{$VT, $VT}, x, y)
 
         code = """
         %res = xor <$N x i64> %1, %0
         ret <$N x i64> %res
         """
-        @eval @inline _xor(x::$VT, y::$VT) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT, $VT}, x, y)
+        @eval @inline _xor(x::$VT, y::$VT) = llvmcall($code, $VT, Tuple{$VT, $VT}, x, y)
 
         code = """
         %res = and <$N x i64> %1, %0
         ret <$N x i64> %res
         """
-        @eval @inline _and(x::$VT, y::$VT) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT, $VT}, x, y)
+        @eval @inline _and(x::$VT, y::$VT) = llvmcall($code, $VT, Tuple{$VT, $VT}, x, y)
 
         code = """
         %res = or <$N x i64> %1, %0
         ret <$N x i64> %res
         """
-        @eval @inline _or(x::$VT, y::$VT) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT, $VT}, x, y)
+        @eval @inline _or(x::$VT, y::$VT) = llvmcall($code, $VT, Tuple{$VT, $VT}, x, y)
 
         code = """
         %tmp = insertelement <1 x i64> undef, i64 %1, i32 0
@@ -89,47 +93,32 @@ for N in [4,8,16]
         %res = lshr <$N x i64> %0, %shift
         ret <$N x i64> %res
         """
-        @eval @inline _lshr(x::$VT, y::Int64) = Core.Intrinsics.llvmcall($code,
-            $VT, Tuple{$VT, Int64}, x, y)
+        @eval @inline _lshr(x::$VT, y::Int64) = llvmcall($code, $VT, Tuple{$VT, Int64}, x, y)
 
-        s = "<" * join(fill("double 1.0", N), ", ") * ">"
         code = """
-        %f = bitcast <$N x i64> %0 to <$N x double>
-        %res = fsub <$N x double> %f, $s
-        %i = bitcast <$N x double> %res to <$N x i64>
+        %shiftamt = shufflevector <1 x i64> <i64 11>, <1 x i64> undef, <$N x i32> zeroinitializer
+        %sh = lshr <$N x i64> %0, %shiftamt
+        %f = uitofp <$N x i64> %sh to <$N x double>
+        %scale = shufflevector <1 x double> <double 0x3ca0000000000000>, <1 x double> undef, <$N x i32> zeroinitializer
+        %m = fmul <$N x double> %f, %scale
+        %i = bitcast <$N x double> %m to <$N x i64>
         ret <$N x i64> %i
         """
-        @eval @inline function _minus1(x::$VT, ::Type{Float64})
-            Core.Intrinsics.llvmcall($code, $VT, Tuple{$VT}, x)
-        end
+        @eval @inline _bits2float(x::$VT, ::Type{Float64}) = llvmcall($code, $VT, Tuple{$VT}, x)
 
-        s = "<" * join(fill("float 1.0", 2N), ", ") * ">"
         code = """
-        %f = bitcast <$N x i64> %0 to <$(2N) x float>
-        %res = fsub <$(2N) x float> %f, $s
-        %i = bitcast <$(2N) x float> %res to <$N x i64>
+        %as32 = bitcast <$N x i64> %0 to <$(2N) x i32>
+        %shiftamt = shufflevector <1 x i32> <i32 8>, <1 x i32> undef, <$(2N) x i32> zeroinitializer
+        %sh = lshr <$(2N) x i32> %as32, %shiftamt
+        %f = uitofp <$(2N) x i32> %sh to <$(2N) x float>
+        %scale = shufflevector <1 x float> <float 0x3e70000000000000>, <1 x float> undef, <$(2N) x i32> zeroinitializer
+        %m = fmul <$(2N) x float> %f, %scale
+        %i = bitcast <$(2N) x float> %m to <$N x i64>
         ret <$N x i64> %i
         """
-        @eval @inline function _minus1(x::$VT, ::Type{Float32})
-            Core.Intrinsics.llvmcall($code, $VT, Tuple{$VT}, x)
-        end
+        @eval @inline _bits2float(x::$VT, ::Type{Float32}) = llvmcall($code, $VT, Tuple{$VT}, x)
     end
 end
-
-
-# The mast values are used as res = _or(_and(res, mskBits), oneBits)
-
-mskBits(::Type{T}) where T = 0xffffffffffffffff
-mskBits(::Type{T}, ::Val{N}) where {T,N} = ntuple(i->VecElement(mskBits(T)), Val(N))
-
-oneBits(::Type{T}) where T = 0x0000000000000000
-oneBits(::Type{T}, ::Val{N}) where {T,N} = ntuple(i->VecElement(oneBits(T)), Val(N))
-
-mskBits(::Type{Float64}) = Base.significand_mask(Float64)
-oneBits(::Type{Float64}) = Base.exponent_one(Float64)
-
-mskBits(::Type{Float32}) = Base.significand_mask(Float32) + UInt64(Base.significand_mask(Float32))<<32
-oneBits(::Type{Float32}) = Base.exponent_one(Float32) + UInt64(Base.exponent_one(Float32))<<32
 
 
 function forkRand(rng::Union{TaskLocalRNG, Xoshiro}, ::Val{N}) where N
@@ -160,9 +149,6 @@ _id(x, T) = x
 end
 
 @noinline function xoshiro_bulk_nosimd(rng::Union{TaskLocalRNG, Xoshiro}, dst::Ptr{UInt8}, len::Int, ::Type{T}, f::F) where {T, F}
-    # we rely on specialization, llvm const-prop + instcombine to remove unneeded masking
-    mskOR =  oneBits(T)
-    mskAND = mskBits(T)
     if rng isa TaskLocalRNG
         task = current_task()
         s0, s1, s2, s3 = task.rngState0, task.rngState1, task.rngState2, task.rngState3
@@ -173,7 +159,6 @@ end
     i = 0
     while i+8 <= len
         res = _rotl23(_plus(s0,s3))
-        res = _or(_and(res, mskAND), mskOR)
         unsafe_store!(reinterpret(Ptr{UInt64}, dst + i), f(res, T))
         t = _shl17(s1)
         s2 = _xor(s2, s0)
@@ -186,7 +171,6 @@ end
     end
     if i < len
         res = _rotl23(_plus(s0,s3))
-        res = _or(_and(res, mskAND), mskOR)
         t = _shl17(s1)
         s2 = _xor(s2, s0)
         s3 = _xor(s3, s1)
@@ -257,16 +241,11 @@ end
 
 
 @noinline function xoshiro_bulk_simd(rng::Union{TaskLocalRNG, Xoshiro}, dst::Ptr{UInt8}, len::Int, ::Type{T}, ::Val{N}, f::F) where {T,N,F}
-    # we rely on specialization, llvm const-prop + instcombine to remove unneeded masking
-    mskOR =  oneBits(T, Val(N))
-    mskAND = mskBits(T, Val(N))
-
     s0, s1, s2, s3 = forkRand(rng, Val(N))
 
     i = 0
     while i + 8*N <= len
         res = _rotl23(_plus(s0,s3))
-        res = _or(_and(res, mskAND), mskOR)
         t = _shl17(s1)
         s2 = _xor(s2, s0)
         s3 = _xor(s3, s1)
@@ -305,12 +284,12 @@ end
 
 
 function rand!(rng::Union{TaskLocalRNG, Xoshiro}, dst::Array{Float32}, ::SamplerTrivial{CloseOpen01{Float32}})
-    GC.@preserve dst xoshiro_bulk(rng, convert(Ptr{UInt8}, pointer(dst)), length(dst)*4, Float32, xoshiroWidth(), _minus1)
+    GC.@preserve dst xoshiro_bulk(rng, convert(Ptr{UInt8}, pointer(dst)), length(dst)*4, Float32, xoshiroWidth(), _bits2float)
     dst
 end
 
 function rand!(rng::Union{TaskLocalRNG, Xoshiro}, dst::Array{Float64}, ::SamplerTrivial{CloseOpen01{Float64}})
-    GC.@preserve dst xoshiro_bulk(rng, convert(Ptr{UInt8}, pointer(dst)), length(dst)*8, Float64, xoshiroWidth(), _minus1)
+    GC.@preserve dst xoshiro_bulk(rng, convert(Ptr{UInt8}, pointer(dst)), length(dst)*8, Float64, xoshiroWidth(), _bits2float)
     dst
 end
 

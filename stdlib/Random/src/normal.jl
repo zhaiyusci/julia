@@ -9,6 +9,9 @@
 
 ## randn
 
+@inline _take52(::AbstractRNG, r::UInt64) = r & 0x000fffffffffffff
+@inline _take52(::Union{TaskLocalRNG, Xoshiro}, r::UInt64) = r >>> 12
+
 """
     randn([rng=GLOBAL_RNG], [T=Float64], [dims...])
 
@@ -47,7 +50,7 @@ julia> randn(rng, ComplexF32, (2, 3))
         r = rand(rng, UInt52Raw())
 
         # the following code is identical to the one in `_randn(rng::AbstractRNG, r::UInt64)`
-        r &= 0x000fffffffffffff
+        r = _take52(rng, r)
         rabs = Int64(r>>1) # One bit for the sign
         idx = rabs & 0xFF
         x = ifelse(r % Bool, -rabs, rabs)*wi[idx+1]
@@ -58,7 +61,7 @@ end
 
 @inline function _randn(rng::AbstractRNG, r::UInt64)
     @inbounds begin
-        r &= 0x000fffffffffffff
+        r = _take52(rng, r)
         rabs = Int64(r>>1) # One bit for the sign
         idx = rabs & 0xFF
         x = ifelse(r % Bool, -rabs, rabs)*wi[idx+1]
@@ -120,7 +123,7 @@ randexp(rng::AbstractRNG=default_rng()) = _randexp(rng, rand(rng, UInt52Raw()))
 
 function _randexp(rng::AbstractRNG, ri::UInt64)
     @inbounds begin
-        ri &= 0x000fffffffffffff
+        ri = _take52(rng, ri)
         idx = ri & 0xFF
         x = ri*we[idx+1]
         ri < ke[idx+1] && return x # 98.9% of the time we return here 1st try

@@ -182,7 +182,9 @@ end
 
 @inline function rand(rng::Union{TaskLocalRNG, Xoshiro},
                       T::SamplerUnion(Bool, Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64))
-    rand(rng, UInt64) % T[]
+    S = T[]
+    # use upper bits
+    (rand(rng, UInt64) >>> (64 - 8*sizeof(S))) % S
 end
 
 function copy(rng::TaskLocalRNG)
@@ -208,3 +210,22 @@ function ==(a::Xoshiro, b::TaskLocalRNG)
 end
 
 ==(a::TaskLocalRNG, b::Xoshiro) = b == a
+
+# for partial words, use upper bits from Xoshiro
+
+rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{UInt52{UInt64}}) = rand(r, UInt64) >>> 12
+
+function rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{UInt104{UInt128}})
+    hi = rand(r, UInt64)
+    lo = rand(r, UInt64)
+    return (hi << 40) ⊻ (lo >>> 12)
+end
+
+rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{CloseOpen01{Float16}}) =
+    Float16(Float32(rand(r, UInt16) >>> 5) * Float32(0x1.0p-11))
+
+rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{CloseOpen01{Float32}}) =
+    Float32(rand(r, UInt32) >>> 8) * Float32(0x1.0p-24)
+
+rand(r::Union{TaskLocalRNG, Xoshiro}, ::SamplerTrivial{CloseOpen01_64}) =
+    Float64(rand(r, UInt64) >>> 11) * 0x1.0p-53
